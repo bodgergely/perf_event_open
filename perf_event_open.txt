@@ -1,0 +1,110 @@
+man perf_event_open
+
+Event flavours:
+1) Counting
+2) Sampling
+
+Event Groups:
+The group_fd argument allows event groups to be created.  An event group has one event which is the group leader.  The leader is cre‐
+       ated  first,  with  group_fd  =  -1.  The rest of the group members are created with subsequent perf_event_open() calls with group_fd
+       being set to the file descriptor of the group leader.  (A single event on its own is created with group_fd = -1 and is considered  to
+       be  a  group with only 1 member.)  An event group is scheduled onto the CPU as a unit: it will be put onto the CPU only if all of the
+       events in the group can be put onto the CPU.  This means that the values of the member events  can  be  meaningfully  compared—added,
+       divided (to get ratios), and so on—with each other, since they have counted events for the same set of executed instructions.
+
+-----------------
+perf_event_attr:|
+-----------------
+
+This struct governs and sets up the type and behaviour of the given
+perf event.
+
+Event types:
+- HARDWARE
+- SOFTWARE
+- TRACEPOINT
+- HW_CACHE
+- RAW: implementation specific
+- BREAKPOINT
+- dynaminc PMU: /sys/bus/event_source/devices lists the values that can
+    be used for the type field
+    /sys/bus/event_source/devices/cpu/type contains the value for the core 
+    CPU PMU which is usually 4
+
+Event subtype:
+ - Specifies the actual type. attr.config field + config1, config2 for extension
+
+TRACEPOINT:
+ - Special event type. It means we are measurig kernel tracepoints.
+    The value to use in config can be obtained from under debugfs 
+    tracing/events/*/*/id if ftrace is enabled in the kernel.
+    Example: sudo cat /sys/kernel/debug/tracing/events/syscalls/sys_enter_read/id
+
+HW_CACHE:
+ - we are measuring hardware CPU cache event. 
+
+RAW:
+ - custom 'raw' config value is needed. Most CPUs support events that are
+    not covered by the 'generalized' events. These are implementation defined
+    See for example Intel Volume 3B or AMD BIOS an Kernel Developer Guide.
+
+    libpfm4 library can be used to translate from the name in the architectural
+    manuals to the raw hex value that the config, config1, config2 expects.
+
+---------
+Sampling|
+---------
+ - period: Sampling events generates overflow notifications every N events
+where N is given by the sample_period. period > 0 if we want to sample.
+When an overflow occures, requested data is recorded in te mmap buffer.
+- freq: can be used instead of the period - freq is based on the timer tick.
+- type: sample_type field controls what data is recorded in the mmap buffer
+ Set the bits that specify what data you need. MMAP layout documents where t
+
+
+attr.precise_ip: this controls the amount of skid.
+**Skid**: How many instructions execute between an event happenng and the
+        kernel being able to stop and record the event. Smaller skid is better and allows more accurate reporting dof which event corresponds to which
+instruction. Hardware is often limited how small it can be.
+
+**Branch sampling**
+- attr.sample_type := PERF_SAMPLE_BRANCH_STACK
+- attr.branch_sample_type <= specifies what type of branches to include.
+
+--------------------
+Reading the results|
+--------------------
+Once  a perf_event_open() file descriptor has been opened, the values of the events can be read from the file descriptor.  The values
+       that are there are specified by the read_format field in the attr structure at open time.
+
+struct read_format {
+                 u64 value;         /* The value of the event */
+                 u64 time_enabled;  /* if PERF_FORMAT_TOTAL_TIME_ENABLED */
+                 u64 time_running;  /* if PERF_FORMAT_TOTAL_TIME_RUNNING */
+                 u64 id;            /* if PERF_FORMAT_ID */
+             };
+nr     The number of events in this file descriptor.  Only available if PERF_FORMAT_GROUP was specified.
+
+time_enabled, time_running
+      Total time the event was enabled and running.  Normally these are the same.   If  more  events  are  started,  then  available
+      counter  slots on the PMU, then multiplexing happens and events run only part of the time.  In that case, the time_enabled and
+      time running values can be used to scale an estimated value for the count.
+
+value  An unsigned 64-bit value containing the counter result.
+
+id     A globally unique value for this particular event, only present if PERF_FORMAT_ID was specified in read_format.
+
+ - MMAP layout
+    In sampled mode, async events (like counter overflow) are logged into a ring-buffer. 
+    This ring-buffer is created and accessed through mmap(). mmaped memory should be 1+2^n pages.
+The first page is a metadata page that contains information such as where is the ring-buffer head.
+    (That metadata header(perf_event_mmap_page) contains the members that needs to be used when doing rdpmc!)
+
+----------------
+Troubleshooting|
+----------------
+/proc/sys/kernel/perf_event_paranoid should be 0 otherwise sudo is
+needed to call perf_event_open.
+sudo sysctl kernel.perf_event_paranoid=0
+
+
